@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#161b1b">
+  <meta name="description" content="Turn a phone photo of a film negative into a positive image, right in your browser.">
+  <title>Negative Studio</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">◫</span><span>Negative <strong>Studio</strong></span></div>
+      <span class="top-note">Your film, your phone</span>
+    </header>
+
+    <main>
+      <section class="intro" aria-labelledby="page-title">
+        <div class="eyebrow">A pocket film scanner</div>
+        <h1 id="page-title">Bring your negatives <em>to light.</em></h1>
+        <p>Photograph a negative on an evenly lit white screen, frame the image, and make a positive you can save. Everything happens in your browser.</p>
+      </section>
+
+      <section class="workspace" aria-label="Negative scanner">
+        <div class="panel source-panel">
+          <div class="panel-heading"><div><span class="step">01</span><h2>Add & frame</h2></div><span class="hint">JPG, PNG, or HEIC*</span></div>
+          <div id="dropzone" class="dropzone">
+            <div class="upload-icon" aria-hidden="true">▣</div>
+            <h3>Start with a negative photo</h3>
+            <p>Place film over a clean white LED screen. Keep the camera square to the film and avoid screen glare.</p>
+            <label class="button primary upload-button">Choose photo<input id="photo-input" type="file" accept="image/*" aria-label="Choose a negative photo"></label>
+            <span class="upload-subtext">Your photo stays on this device.</span>
+          </div>
+          <div id="framing" class="framing hidden">
+            <div class="frame-stage" id="frame-stage" aria-label="Drag the crop edges or corners to frame the negative">
+              <canvas id="source-canvas"></canvas>
+              <div id="crop-box" class="crop-box">
+                <div class="crop-grid" aria-hidden="true"></div>
+                <span class="crop-label">Your frame</span>
+                <span class="handle nw" data-handle="nw" aria-hidden="true"></span>
+                <span class="handle ne" data-handle="ne" aria-hidden="true"></span>
+                <span class="handle sw" data-handle="sw" aria-hidden="true"></span>
+                <span class="handle se" data-handle="se" aria-hidden="true"></span>
+              </div>
+            </div>
+            <p class="frame-help">Drag the corners to keep only the film image. Exclude the bright screen and film border for the best automatic color.</p>
+            <div class="frame-actions">
+              <button id="change-photo" class="text-button" type="button">Change photo</button>
+              <div><button id="rotate" class="text-button" type="button">↻ Rotate</button><button id="reset-crop" class="text-button" type="button">Reset frame</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel output-panel">
+          <div class="panel-heading"><div><span class="step">02</span><h2>Make it positive</h2></div><span id="status" class="status">Waiting for photo</span></div>
+          <div id="empty-preview" class="empty-preview"><div class="preview-glyph" aria-hidden="true">✳</div><p>Your converted image will appear here.</p></div>
+          <div id="result-wrap" class="result-wrap hidden"><canvas id="result-canvas" aria-label="Positive image preview"></canvas></div>
+          <div class="controls">
+            <fieldset class="film-choice" aria-label="Film type"><legend>Film type</legend><label><input type="radio" name="film" value="color" checked><span>Color negative</span></label><label><input type="radio" name="film" value="bw"><span>Black & white</span></label></fieldset>
+            <label class="toggle-row"><span><strong>Auto color & levels</strong><small>Balances the film base and stretches tones</small></span><input id="auto-levels" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
+            <div class="slider"><label for="exposure">Exposure <output id="exposure-value">0.0</output></label><input id="exposure" type="range" min="-2" max="2" step="0.1" value="0"></div>
+            <div class="slider"><label for="contrast">Contrast <output id="contrast-value">0</output></label><input id="contrast" type="range" min="-50" max="50" step="1" value="0"></div>
+            <details class="fine-tune"><summary>Fine tune color <span>⌄</span></summary><div class="slider"><label for="red">Red <output id="red-value">0</output></label><input id="red" type="range" min="-50" max="50" step="1" value="0"></div><div class="slider"><label for="green">Green <output id="green-value">0</output></label><input id="green" type="range" min="-50" max="50" step="1" value="0"></div><div class="slider"><label for="blue">Blue <output id="blue-value">0</output></label><input id="blue" type="range" min="-50" max="50" step="1" value="0"></div><button id="reset-adjustments" class="text-button" type="button">Reset adjustments</button></details>
+            <div class="save-actions"><button id="save-jpeg" class="button primary" type="button" disabled>Save JPEG</button><button id="share-image" class="button secondary hidden" type="button" disabled>Share image</button></div>
+            <p class="save-note">Save JPEG exports up to 4000 pixels on the longest side. On iPhone, Share image can send it to Photos or Files.</p>
+          </div>
+        </div>
+      </section>
+      <section class="tips" aria-labelledby="tips-title"><div class="eyebrow">Before you shoot</div><h2 id="tips-title">A better negative photo</h2><div class="tips-grid"><p><span>01</span> Turn screen brightness up and show a plain white image.</p><p><span>02</span> Lift the film slightly off the pixels to soften screen patterns.</p><p><span>03</span> Lock focus and exposure on the film, then avoid reflections.</p></div></section>
+    </main>
+    <footer>Negative Studio <span>Private, browser-based conversion · *HEIC support depends on your browser</span></footer>
+  </div>
+</body>
+</html>
