@@ -17,10 +17,11 @@
   const viewImageButton = $('view-image');
   const editor = window.NegativeEditor;
   const controls = editor.adjustments.flatMap(group => group.controls.map(([id]) => id));
+  const adjustmentLabel = (id, value) => id === 'exposure' ? Number(value).toFixed(1) : String(value);
   $('editor-controls').innerHTML = editor.adjustments.map(group => `
     <details class="edit-group" data-group="${group.title.toLowerCase()}" ${group.open ? 'open' : ''}>
       <summary>${group.title}<span class="group-meta">${group.meta}</span><span class="chevron">⌄</span></summary>
-      ${group.controls.map(([id, label, min, max, step]) => `<div class="slider"><label for="${id}">${label}<output id="${id}-value">${id === 'exposure' ? '0.0' : '0'}</output></label><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="0"></div>`).join('')}
+      ${group.controls.map(([id, label, min, max, step]) => `<div class="slider"><label for="${id}">${label}<output id="${id}-value">${adjustmentLabel(id, editor.defaults[id])}</output></label><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${editor.defaults[id]}"></div>`).join('')}
     </details>`).join('');
 
   let source = null;
@@ -137,6 +138,7 @@
         canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
         canvas.getContext('2d', { alpha: false }).drawImage(img, 0, 0, canvas.width, canvas.height);
         source = canvas;
+        for (const id of controls) setAdjustment(id, editor.defaults[id]);
         crop = { x: .06, y: .06, w: .88, h: .88 };
         outputName = file.name.replace(/\.[^.]+$/, '').replace(/[^a-z0-9_-]+/gi, '-').slice(0, 60) || 'negative';
         dropzone.classList.add('hidden');
@@ -222,7 +224,7 @@
 
   function setAdjustment(id, value) {
     $(id).value = value;
-    $(`${id}-value`).value = id === 'exposure' ? Number(value).toFixed(1) : String(value);
+    $(`${id}-value`).value = adjustmentLabel(id, value);
   }
 
   for (const id of controls) {
@@ -238,7 +240,7 @@
   syncFilmControls();
   $('auto-levels').addEventListener('change', () => schedulePreview(0));
   $('reset-adjustments').addEventListener('click', () => {
-    for (const id of controls) setAdjustment(id, 0);
+    for (const id of controls) setAdjustment(id, editor.defaults[id]);
     schedulePreview(0);
   });
   $('auto-adjust').addEventListener('click', () => {
