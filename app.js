@@ -13,14 +13,28 @@
   const emptyPreview = $('empty-preview');
   const status = $('status');
   const saveButton = $('save-jpeg');
-  const shareButton = $('share-image');
-  const controls = ['exposure', 'contrast', 'red', 'green', 'blue'];
+  const photosButton = $('save-photos');
+  const viewImageButton = $('view-image');
+  const editor = window.NegativeEditor;
+  const controls = editor.adjustments.flatMap(group => group.controls.map(([id]) => id));
+  $('editor-controls').innerHTML = editor.adjustments.map(group => `
+    <details class="edit-group" data-group="${group.title.toLowerCase()}" ${group.open ? 'open' : ''}>
+      <summary>${group.title}<span class="group-meta">${group.meta}</span><span class="chevron">⌄</span></summary>
+      ${group.controls.map(([id, label, min, max, step]) => `<div class="slider"><label for="${id}">${label}<output id="${id}-value">${id === 'exposure' ? '0.0' : '0'}</output></label><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="0"></div>`).join('')}
+    </details>`).join('');
 
   let source = null;
   let crop = { x: .06, y: .06, w: .88, h: .88 };
   let drag = null;
   let renderTimer = null;
+  let photoPrepTimer = null;
+  let preparationPromise = null;
+  let preparationVersion = -1;
+  let cachedPhoto = null;
+  let editVersion = 0;
+  let photoObjectUrl = null;
   let outputName = 'positive';
+  let comparing = false;
 
   const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
   const nextFrame = () => new Promise((resolve) => requestAnimationFrame(resolve));
@@ -28,11 +42,7 @@
   const settings = () => ({
     film: filmMode(),
     auto: $('auto-levels').checked,
-    exposure: Number($('exposure').value),
-    contrast: Number($('contrast').value),
-    red: Number($('red').value),
-    green: Number($('green').value),
-    blue: Number($('blue').value)
+    ...Object.fromEntries(controls.map(id => [id, Number($(id).value)]))
   });
 
   function setStatus(message) { status.textContent = message; }
@@ -66,69 +76,7 @@
     cropBox.style.height = `${crop.h * canvasRect.height}px`;
   }
 
-  function percentileBounds(histogram, count) {
-    const lowTarget = count * .008;
-    const highTarget = count * .992;
-    let cumulative = 0, low = 0, high = 255;
-    for (let i = 0; i < 256; i++) {
-      cumulative += histogram[i];
-      if (cumulative >= lowTarget) { low = i; break; }
-    }
-    cumulative = 0;
-    for (let i = 0; i < 256; i++) {
-      cumulative += histogram[i];
-      if (cumulative >= highTarget) { high = i; break; }
-    }
-    if (high - low < 28) {
-      const mid = (high + low) / 2;
-      low = Math.max(0, mid - 14);
-      high = Math.min(255, mid + 14);
-    }
-    return [low, high];
-  }
-
-  function processPixels(imageData, options) {
-    const data = imageData.data;
-    const hist = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
-    let count = 0;
-    if (options.auto) {
-      const stride = Math.max(1, Math.ceil((data.length / 4) / 160000));
-      for (let p = 0; p < data.length; p += 4 * stride) {
-        const r = 255 - data[p], g = 255 - data[p + 1], b = 255 - data[p + 2];
-        if (options.film === 'bw') {
-          hist[0][Math.round(.2126 * r + .7152 * g + .0722 * b)]++;
-        } else {
-          hist[0][r]++; hist[1][g]++; hist[2][b]++;
-        }
-        count++;
-      }
-    }
-    const bounds = options.auto ? hist.map(h => percentileBounds(h, count)) : [[0, 255], [0, 255], [0, 255]];
-    const exposure = Math.pow(2, options.exposure);
-    const contrast = 1 + options.contrast / 75;
-    const shift = [options.red, options.green, options.blue].map(v => v / 255);
-    const lookup = bounds.map(([low, high], channel) => {
-      const table = new Uint8Array(256);
-      for (let n = 0; n < 256; n++) {
-        let value = (n - low) / (high - low);
-        value = (value - .5) * contrast + .5;
-        table[n] = clamp((value * exposure + (options.film === 'color' ? shift[channel] : 0)) * 255, 0, 255);
-      }
-      return table;
-    });
-    for (let p = 0; p < data.length; p += 4) {
-      if (options.film === 'bw') {
-        const gray = .2126 * (255 - data[p]) + .7152 * (255 - data[p + 1]) + .0722 * (255 - data[p + 2]);
-        data[p] = data[p + 1] = data[p + 2] = lookup[0][Math.round(gray)];
-      } else {
-        data[p] = lookup[0][255 - data[p]];
-        data[p + 1] = lookup[1][255 - data[p + 1]];
-        data[p + 2] = lookup[2][255 - data[p + 2]];
-      }
-    }
-  }
-
-  function renderTo(canvas, maxSide) {
+  function renderTo(canvas, maxSide, options = settings()) {
     const sx = Math.round(crop.x * source.width);
     const sy = Math.round(crop.y * source.height);
     const sw = Math.max(1, Math.round(crop.w * source.width));
@@ -139,22 +87,35 @@
     const ctx = canvas.getContext('2d', { willReadFrequently: true, alpha: false });
     ctx.drawImage(source, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
     const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    processPixels(pixels, settings());
+    editor.processPixels(pixels, canvas.width, canvas.height, options);
     ctx.putImageData(pixels, 0, 0);
   }
 
-  function schedulePreview(delay = 130) {
+  function schedulePreview(delay = 130, invalidate = true) {
     if (!source) return;
     clearTimeout(renderTimer);
-    setStatus('Processing…');
+    if (invalidate) {
+      editVersion++;
+      cachedPhoto = null;
+      clearTimeout(photoPrepTimer);
+      photosButton.disabled = true;
+      viewImageButton.disabled = true;
+      photosButton.textContent = 'Preparing photo…';
+    }
+    if (!comparing) setStatus('Processing…');
     renderTimer = setTimeout(() => {
       try {
-        renderTo(resultView, 1200);
+        renderTo(resultView, 1200, comparing ? { ...settings(), ...editor.defaults } : settings());
         emptyPreview.classList.add('hidden');
         resultWrap.classList.remove('hidden');
-        setStatus(`${resultView.width} × ${resultView.height} preview`);
+        setStatus(comparing ? 'Before adjustments' : `${resultView.width} × ${resultView.height} preview`);
         saveButton.disabled = false;
-        shareButton.disabled = false;
+        $('auto-adjust').disabled = false;
+        $('compare').disabled = false;
+        if (!comparing && !cachedPhoto) {
+          clearTimeout(photoPrepTimer);
+          photoPrepTimer = setTimeout(() => preparePhotos(editVersion), 550);
+        }
       } catch (error) {
         console.error(error);
         setStatus('Could not process photo');
@@ -247,63 +208,163 @@
     crop = { x: .06, y: .06, w: .88, h: .88 };
     drawSourceView(); schedulePreview(0);
   });
+  $('flip').addEventListener('click', () => {
+    if (!source) return;
+    const flipped = document.createElement('canvas');
+    flipped.width = source.width; flipped.height = source.height;
+    const ctx = flipped.getContext('2d', { alpha: false });
+    ctx.translate(flipped.width, 0); ctx.scale(-1, 1);
+    ctx.drawImage(source, 0, 0);
+    source = flipped;
+    crop.x = 1 - crop.x - crop.w;
+    drawSourceView(); schedulePreview(0);
+  });
+
+  function setAdjustment(id, value) {
+    $(id).value = value;
+    $(`${id}-value`).value = id === 'exposure' ? Number(value).toFixed(1) : String(value);
+  }
 
   for (const id of controls) {
     $(id).addEventListener('input', () => {
-      $(`${id}-value`).value = id === 'exposure' ? Number($(id).value).toFixed(1) : $(id).value;
+      setAdjustment(id, $(id).value);
       schedulePreview();
     });
   }
-  document.querySelectorAll('input[name="film"]').forEach(el => el.addEventListener('change', schedulePreview.bind(null, 0)));
+  function syncFilmControls() {
+    $('editor-controls').querySelector('[data-group="color"]').classList.toggle('hidden', filmMode() === 'bw');
+  }
+  document.querySelectorAll('input[name="film"]').forEach(el => el.addEventListener('change', () => { syncFilmControls(); schedulePreview(0); }));
+  syncFilmControls();
   $('auto-levels').addEventListener('change', () => schedulePreview(0));
   $('reset-adjustments').addEventListener('click', () => {
-    for (const id of controls) { $(id).value = 0; $(`${id}-value`).value = id === 'exposure' ? '0.0' : '0'; }
+    for (const id of controls) setAdjustment(id, 0);
     schedulePreview(0);
   });
-
-  function exportBlob() {
-    return new Promise(async (resolve, reject) => {
-      try {
-        await nextFrame();
-        const canvas = document.createElement('canvas');
-        renderTo(canvas, 4000);
-        canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('JPEG export failed')), 'image/jpeg', .94);
-      } catch (error) { reject(error); }
-    });
-  }
-
-  async function saveOrShare(share) {
+  $('auto-adjust').addEventListener('click', () => {
     if (!source) return;
-    saveButton.disabled = shareButton.disabled = true;
-    setStatus('Preparing high-resolution image…');
+    setStatus('Analyzing photo…');
     try {
-      const blob = await exportBlob();
-      const name = `${outputName}-positive.jpg`;
-      if (share && navigator.share) {
-        const file = new File([blob], name, { type: 'image/jpeg' });
-        if (!navigator.canShare || navigator.canShare({ files: [file] })) {
-          await navigator.share({ files: [file], title: name });
-          setStatus('Ready');
-          return;
-        }
-      }
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url; link.download = name;
-      document.body.appendChild(link); link.click(); link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-      setStatus('JPEG ready');
-    } catch (error) {
-      if (error.name !== 'AbortError') { console.error(error); setStatus('Could not save image'); }
-      else setStatus('Ready');
+      const sample = document.createElement('canvas');
+      renderTo(sample, 600, { ...settings(), ...editor.defaults });
+      const pixels = sample.getContext('2d').getImageData(0, 0, sample.width, sample.height);
+      const values = editor.analyzeAuto(pixels, filmMode());
+      for (const id of controls) setAdjustment(id, values[id]);
+      schedulePreview(0);
+    } catch (error) { console.error(error); setStatus('Auto Adjust could not analyze this photo'); }
+  });
+  const compare = $('compare');
+  const startCompare = (event) => { if (compare.disabled) return; event.preventDefault(); comparing = true; schedulePreview(0, false); };
+  const stopCompare = () => { if (comparing) { comparing = false; schedulePreview(0, false); } };
+  compare.addEventListener('pointerdown', startCompare);
+  compare.addEventListener('pointerup', stopCompare);
+  compare.addEventListener('pointercancel', stopCompare);
+  compare.addEventListener('pointerleave', stopCompare);
+  compare.addEventListener('keydown', event => { if (event.key === ' ' || event.key === 'Enter') startCompare(event); });
+  compare.addEventListener('keyup', stopCompare);
+
+  async function exportBlob() {
+    await nextFrame();
+    const canvas = document.createElement('canvas');
+    try {
+      renderTo(canvas, 4000);
+      return await new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('JPEG export failed')), 'image/jpeg', .94));
     } finally {
-      saveButton.disabled = shareButton.disabled = false;
+      canvas.width = canvas.height = 0;
     }
   }
 
-  saveButton.addEventListener('click', () => saveOrShare(false));
-  shareButton.addEventListener('click', () => saveOrShare(true));
-  if (navigator.share && typeof File !== 'undefined') shareButton.classList.remove('hidden');
+  async function preparePhotos(version) {
+    photoPrepTimer = null;
+    if (version !== editVersion || cachedPhoto) return;
+    if (preparationPromise) {
+      try { await preparationPromise; } catch { /* A previous attempt may have failed. */ }
+      if (version !== editVersion || cachedPhoto) return;
+    }
+    const work = exportBlob();
+    preparationPromise = work;
+    preparationVersion = version;
+    try {
+      const blob = await work;
+      if (version === editVersion) {
+        cachedPhoto = blob;
+        photosButton.disabled = false;
+        viewImageButton.disabled = false;
+        photosButton.textContent = 'Save to Photos';
+      }
+    } catch (error) {
+      console.error(error);
+      if (version === editVersion) { photosButton.textContent = 'Save to Photos'; setStatus('Could not prepare Photos image'); }
+    } finally {
+      if (preparationPromise === work) { preparationPromise = null; preparationVersion = -1; }
+    }
+  }
+
+  async function saveJPEG() {
+    if (!source) return;
+    saveButton.disabled = true;
+    setStatus('Preparing high-resolution image…');
+    try {
+      clearTimeout(photoPrepTimer);
+      photoPrepTimer = null;
+      const version = editVersion;
+      const blob = cachedPhoto || await (preparationPromise && preparationVersion === version ? preparationPromise : exportBlob());
+      if (version === editVersion) {
+        cachedPhoto = blob;
+        photosButton.disabled = false;
+        viewImageButton.disabled = false;
+        photosButton.textContent = 'Save to Photos';
+      }
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url; link.download = `${outputName}-positive.jpg`;
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      setStatus('JPEG ready');
+    } catch (error) { console.error(error); setStatus('Could not save JPEG'); }
+    finally { saveButton.disabled = false; }
+  }
+
+  function openPhotosDialog(blob) {
+    if (photoObjectUrl) URL.revokeObjectURL(photoObjectUrl);
+    photoObjectUrl = URL.createObjectURL(blob);
+    $('photos-preview').src = photoObjectUrl;
+    $('photos-dialog').showModal();
+    setStatus('Touch and hold the image to save it');
+  }
+
+  function saveToPhotos() {
+    if (!cachedPhoto) return;
+    const name = `${outputName}-positive.jpg`;
+    if (navigator.share && typeof File !== 'undefined') {
+      const file = new File([cachedPhoto], name, { type: 'image/jpeg' });
+      try {
+        if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+          setStatus('Choose Save Image in the share sheet');
+          // Call share during this tap; awaiting image conversion first can lose Safari's user activation.
+          Promise.resolve(navigator.share({ files: [file] })).then(
+            () => setStatus('Share sheet closed'),
+            error => {
+              if (error.name === 'AbortError') setStatus('Save cancelled');
+              else { console.error(error); openPhotosDialog(cachedPhoto); }
+            }
+          );
+          return;
+        }
+      } catch (error) { console.error(error); }
+    }
+    openPhotosDialog(cachedPhoto);
+  }
+
+  saveButton.addEventListener('click', saveJPEG);
+  photosButton.addEventListener('click', saveToPhotos);
+  viewImageButton.addEventListener('click', () => { if (cachedPhoto) openPhotosDialog(cachedPhoto); });
+  $('close-photos').addEventListener('click', () => $('photos-dialog').close());
+  $('photos-dialog').addEventListener('close', () => {
+    $('photos-preview').removeAttribute('src');
+    if (photoObjectUrl) URL.revokeObjectURL(photoObjectUrl);
+    photoObjectUrl = null;
+  });
   ['dragenter', 'dragover'].forEach(name => dropzone.addEventListener(name, e => { e.preventDefault(); dropzone.classList.add('dragover'); }));
   ['dragleave', 'drop'].forEach(name => dropzone.addEventListener(name, e => { e.preventDefault(); dropzone.classList.remove('dragover'); }));
   dropzone.addEventListener('drop', e => usePhoto(e.dataTransfer.files[0]));
