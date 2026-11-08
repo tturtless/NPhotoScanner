@@ -7,6 +7,8 @@
   <meta name="description" content="Turn a phone photo of a film negative into a positive image, right in your browser.">
   <title>Negative Studio</title>
   <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./editor.css">
+  <script src="./editor.js" defer></script>
   <script src="./app.js" defer></script>
 </head>
 <body>
@@ -48,7 +50,7 @@
             <p class="frame-help">Drag the corners to keep only the film image. Exclude the bright screen and film border for the best automatic color.</p>
             <div class="frame-actions">
               <button id="change-photo" class="text-button" type="button">Change photo</button>
-              <div><button id="rotate" class="text-button" type="button">↻ Rotate</button><button id="reset-crop" class="text-button" type="button">Reset frame</button></div>
+              <div><button id="rotate" class="text-button" type="button">↻ Rotate</button><button id="flip" class="text-button" type="button">⇄ Flip</button><button id="reset-crop" class="text-button" type="button">Reset frame</button></div>
             </div>
           </div>
         </div>
@@ -60,11 +62,12 @@
           <div class="controls">
             <fieldset class="film-choice" aria-label="Film type"><legend>Film type</legend><label><input type="radio" name="film" value="color" checked><span>Color negative</span></label><label><input type="radio" name="film" value="bw"><span>Black & white</span></label></fieldset>
             <label class="toggle-row"><span><strong>Auto color & levels</strong><small>Balances the film base and stretches tones</small></span><input id="auto-levels" type="checkbox" checked><span class="switch" aria-hidden="true"></span></label>
-            <div class="slider"><label for="exposure">Exposure <output id="exposure-value">0.0</output></label><input id="exposure" type="range" min="-2" max="2" step="0.1" value="0"></div>
-            <div class="slider"><label for="contrast">Contrast <output id="contrast-value">0</output></label><input id="contrast" type="range" min="-50" max="50" step="1" value="0"></div>
-            <details class="fine-tune"><summary>Fine tune color <span>⌄</span></summary><div class="slider"><label for="red">Red <output id="red-value">0</output></label><input id="red" type="range" min="-50" max="50" step="1" value="0"></div><div class="slider"><label for="green">Green <output id="green-value">0</output></label><input id="green" type="range" min="-50" max="50" step="1" value="0"></div><div class="slider"><label for="blue">Blue <output id="blue-value">0</output></label><input id="blue" type="range" min="-50" max="50" step="1" value="0"></div><button id="reset-adjustments" class="text-button" type="button">Reset adjustments</button></details>
-            <div class="save-actions"><button id="save-jpeg" class="button primary" type="button" disabled>Save JPEG</button><button id="share-image" class="button secondary hidden" type="button" disabled>Share image</button></div>
-            <p class="save-note">Save JPEG exports up to 4000 pixels on the longest side. On iPhone, Share image can send it to Photos or Files.</p>
+            <div class="quick-actions"><button id="auto-adjust" class="button auto-button" type="button" disabled>✦ Auto Adjust</button><button id="compare" class="button compare-button" type="button" disabled>Hold to compare</button></div>
+            <div id="editor-controls" class="editor-controls"></div>
+            <button id="reset-adjustments" class="text-button reset-all" type="button">Reset all adjustments</button>
+            <div class="save-actions"><button id="save-jpeg" class="button primary" type="button" disabled>Save JPEG</button><button id="save-photos" class="button secondary" type="button" disabled>Save to Photos</button></div>
+            <p class="save-note">On iPhone, tap Save to Photos, then choose <strong>Save Image</strong> in the iOS share sheet. Safari requires that final tap. If sharing is unavailable, touch and hold the image shown. JPEG exports are up to 4000 pixels on the longest side.</p>
+            <button id="view-image" class="text-button manual-save" type="button" disabled>Open image for manual save</button>
           </div>
         </div>
       </section>
@@ -72,5 +75,6 @@
     </main>
     <footer>Negative Studio <span>Private, browser-based conversion · *HEIC support depends on your browser</span></footer>
   </div>
+  <dialog id="photos-dialog" class="photos-dialog" aria-labelledby="photos-dialog-title"><button id="close-photos" class="text-button close-photos" type="button">Close</button><h2 id="photos-dialog-title">Save this image</h2><p>Touch and hold the image, then choose <strong>Save Image</strong> or <strong>Add to Photos</strong>.</p><img id="photos-preview" alt="Your converted positive image"></dialog>
 </body>
 </html>
